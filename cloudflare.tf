@@ -42,7 +42,7 @@ resource "cloudflare_page_rule" "root_to_www" {
 # asverify record to allow Azure to natively validate the custom domain for the Storage Account
 resource "cloudflare_record" "asverify" {
   zone_id = data.cloudflare_zone.undois.id
-  name    = "asverify"
+  name    = "asverify.www"
   content = "asverify.undoissite.z20.web.core.windows.net"
   type    = "CNAME"
   proxied = false

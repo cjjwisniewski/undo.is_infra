@@ -14,7 +14,7 @@ resource "azurerm_storage_account" "static_site" {
   }
 
   custom_domain {
-    name          = local.domain_name
+    name          = "www.${local.domain_name}"
     use_subdomain = true
   }
 
