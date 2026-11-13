@@ -29,15 +29,6 @@ resource "azuread_application_federated_identity_credential" "github_deploy" {
   subject        = "repo:${local.github_repo}:ref:refs/heads/main" # Scoped to the `main` branch
 }
 
-resource "azuread_application_federated_identity_credential" "github_infra_deploy" {
-  application_id = azuread_application.github_deploy.id
-  display_name   = "github-actions-infra-deploy"
-  description    = "Deploy Terraform infra from GitHub Actions main branch"
-  audiences      = ["api://AzureADTokenExchange"]
-  issuer         = "https://token.actions.githubusercontent.com"
-  subject        = "repo:cjjwisniewski/undo.is_infra:ref:refs/heads/main"
-}
-
 # Grant the Service Principal permission to upload blobs to the Storage Account
 resource "azurerm_role_assignment" "github_deploy_storage" {
   scope                = azurerm_storage_account.static_site.id
