@@ -32,7 +32,6 @@ jobs:
   terraform:
     name: Terraform Plan & Apply
     runs-on: ubuntu-latest
-    environment: production
     env:
       ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID || secrets.AZURE_SUBSCRIPTION_ID }}
       ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID || secrets.AZURE_TENANT_ID }}
