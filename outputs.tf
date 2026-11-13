@@ -32,3 +32,9 @@ output "azure_subscription_id" {
   description = "Subscription ID of the Azure Subscription."
   value       = data.azurerm_subscription.primary.subscription_id
 }
+
+output "status_heartbeat_token" {
+  description = "Bearer token for pushing homelab heartbeats to the status Worker."
+  value       = random_password.status_heartbeat_token.result
+  sensitive   = true
+}
