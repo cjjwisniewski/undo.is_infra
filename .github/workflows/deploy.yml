@@ -1,0 +1,110 @@
+name: Deploy Terraform Infrastructure
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Apply changes (if false, runs plan only)'
+        required: false
+        default: false
+        type: boolean
+      untaint_address:
+        description: 'Optional resource address to untaint before planning'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: undois-infra-terraform
+  cancel-in-progress: false
+
+jobs:
+  terraform:
+    name: Terraform Plan & Apply
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID || secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID || secrets.AZURE_TENANT_ID }}
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID || secrets.AZURE_CLIENT_ID }}
+      ARM_USE_OIDC: 'true'
+      TF_IN_AUTOMATION: 'true'
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.CLOUDFLARE_TOKEN || secrets.CF_API_TOKEN || vars.CLOUDFLARE_API_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '~1.9.0'
+          terraform_wrapper: false
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID || secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID || secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID || secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve Backend Storage Access Key
+        run: |
+          BACKEND_KEY=$(az storage account keys list \
+            --resource-group "undoissite" \
+            --account-name "undoissite" \
+            --query "[0].value" \
+            --output tsv 2>/dev/null || true)
+          if [ -n "$BACKEND_KEY" ]; then
+            echo "::add-mask::$BACKEND_KEY"
+            echo "ARM_ACCESS_KEY=$BACKEND_KEY" >> "$GITHUB_ENV"
+          fi
+
+      - name: Validate Required Credentials
+        run: |
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN is empty. Set secrets.CLOUDFLARE_API_TOKEN in the repository or production environment."
+            exit 1
+          fi
+
+      - name: Terraform Init, Validate & Plan
+        env:
+          UNTAINT_ADDRESS: ${{ github.event.inputs.untaint_address }}
+        run: |
+          set -euo pipefail
+          terraform init -input=false
+          terraform validate
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${UNTAINT_ADDRESS:-}" ]; then
+            echo "Untainting resource: $UNTAINT_ADDRESS"
+            terraform untaint "$UNTAINT_ADDRESS"
+          fi
+          terraform plan -input=false -out=tfplan
+
+          DESTROY_COUNT=$(terraform show -json tfplan | jq '[.resource_changes[]? | select(.change.actions | index("delete"))] | length')
+          if [ "$DESTROY_COUNT" -gt 0 ]; then
+            echo "::error::Plan includes $DESTROY_COUNT resource deletion(s)/replacement(s)! Aborting auto-apply to protect stateful resources."
+            terraform show tfplan
+            exit 1
+          fi
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.apply }}" = "true" ]; then
+            echo "Applying safe (non-destructive) plan..."
+            terraform apply -input=false -auto-approve tfplan
+          else
+            echo "Plan complete (auto-apply disabled on push; use workflow_dispatch with apply=true to apply)."
+          fi
+          rm -f tfplan
+
+      - name: Azure Logout
+        if: always()
+        run: az logout || true
