@@ -4,12 +4,20 @@ data "azuread_client_config" "current" {}
 resource "azuread_application" "github_deploy" {
   display_name = "${local.project_prefix}-github-deploy"
   owners       = [data.azuread_client_config.current.object_id]
+
+  lifecycle {
+    ignore_changes = [owners]
+  }
 }
 
 resource "azuread_service_principal" "github_deploy" {
   client_id                    = azuread_application.github_deploy.client_id
   app_role_assignment_required = false
   owners                       = [data.azuread_client_config.current.object_id]
+
+  lifecycle {
+    ignore_changes = [owners]
+  }
 }
 
 resource "azuread_application_federated_identity_credential" "github_deploy" {
