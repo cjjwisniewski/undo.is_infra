@@ -1,10 +1,10 @@
 const STALE_AFTER_MS = 3 * 60 * 1000;
 
 const EXPECTED_HOSTS = [
-  { id: "intelligence-1", label: "intelligence-1", role: "Docker Host" },
-  { id: "glados-core-1", label: "glados-core-1", role: "VM Host" },
-  { id: "adventure-2", label: "adventure-2", role: "Valheim" },
-  { id: "adventure-1", label: "adventure-1", role: "Minecraft" },
+  { hostId: "intelligence-1", id: "docker-host", label: "Docker Host", role: "Core Services" },
+  { hostId: "glados-core-1", id: "vm-host", label: "VM Host", role: "Infrastructure" },
+  { hostId: "adventure-2", id: "valheim", label: "Valheim", role: "Game Server" },
+  { hostId: "adventure-1", id: "minecraft", label: "Minecraft", role: "Game Server" },
 ];
 
 function corsHeaders(origin) {
@@ -78,7 +78,13 @@ export default {
             overall: "offline",
             stale: true,
             updated_at: null,
-            hosts: EXPECTED_HOSTS.map((h) => ({ ...h, status: "offline", uptime: null })),
+            hosts: EXPECTED_HOSTS.map(({ id, label, role }) => ({
+              id,
+              label,
+              role,
+              status: "offline",
+              uptime: null,
+            })),
           },
           200,
           origin
@@ -88,11 +94,13 @@ export default {
       const data = JSON.parse(raw);
       const stale = !data.updated_at || now - data.updated_at > STALE_AFTER_MS;
 
-      const hosts = EXPECTED_HOSTS.map((h) => {
-        const reported = data.hosts?.[h.id];
+      const hosts = EXPECTED_HOSTS.map(({ hostId, id, label, role }) => {
+        const reported = data.hosts?.[hostId];
         const online = !stale && reported?.status === "online";
         return {
-          ...h,
+          id,
+          label,
+          role,
           status: online ? "online" : "offline",
           uptime: online ? reported.uptime ?? null : null,
         };
@@ -100,7 +108,7 @@ export default {
 
       const anyOnline = hosts.some((h) => h.status === "online");
       const allCoreOnline = hosts
-        .filter((h) => h.id !== "adventure-1")
+        .filter((h) => h.id !== "minecraft")
         .every((h) => h.status === "online");
 
       const overall = stale || !anyOnline ? "offline" : allCoreOnline ? "operational" : "degraded";
