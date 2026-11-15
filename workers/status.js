@@ -1,4 +1,4 @@
-const STALE_AFTER_MS = 3 * 60 * 1000;
+const STALE_AFTER_MS = 7 * 60 * 1000;
 
 const EXPECTED_HOSTS = [
   { hostId: "intelligence-1", id: "docker-host", label: "Docker Host", role: "Core Services" },
