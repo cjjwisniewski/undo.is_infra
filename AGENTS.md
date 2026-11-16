@@ -20,7 +20,8 @@ This repository contains the Terraform configuration and Cloudflare Worker code 
 - **Cloudflare Edge & Redirects**:
   - `www` CNAME -> `undoissite` `primary_web_host` (`proxied = true`).
   - `cloudflare_page_rule.root_to_www` redirects `undo.is/*` -> `https://www.undo.is/$1` (`301`).
-  - Zone SSL is `full` with `always_use_https = "on"`, `automatic_https_rewrites = "on"`, and `brotli = "on"`.
+  - Zone SSL is `full` with `always_use_https = "on"`, `automatic_https_rewrites = "on"`, `brotli = "on"`, `email_obfuscation = "off"`, and `rocket_loader = "off"`.
+  - `cloudflare_ruleset.security_headers` sets CSP, HSTS, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, and `Permissions-Policy` on `www.undo.is`.
 - **GitHub Actions OIDC (`github.tf`)**:
   - `undois-github-deploy` Azure AD App/SP has a federated identity credential scoped strictly to `repo:cjjwisniewski/undo.is:ref:refs/heads/main` with `Storage Blob Data Contributor` on `undoissite`.
   - `azuread_application` and `azuread_service_principal` use `lifecycle { ignore_changes = [owners] }`; preserve this to avoid spurious diffs.
@@ -30,7 +31,7 @@ This repository contains the Terraform configuration and Cloudflare Worker code 
 - **Routes**: `www.undo.is/api/status*` and `status.undo.is/*` (non-API requests on `status.undo.is` redirect `302` to `https://www.undo.is/status/`).
 - **Host Mapping & Staleness**:
   - `EXPECTED_HOSTS` maps internal `hostId`s (`intelligence-1`, `glados-core-1`, `adventure-2`, `adventure-1`) to public IDs (`docker-host`, `vm-host`, `valheim`, `minecraft`).
-  - `minecraft` is excluded from `allCoreOnline` (if only `minecraft` is offline, `overall` is `"degraded"`, not `"offline"`).
+  - `minecraft` is excluded from `allCoreOnline` (so `overall` remains `"operational"` if only `minecraft` is offline; if another host goes offline while at least one host is online, `overall` becomes `"degraded"`).
   - `STALE_AFTER_MS` is `11 * 60 * 1000` (11 minutes) to provide >2x buffer over the 5-minute `status-pusher` interval (`288` KV writes/day).
 - **CORS**: Allows `https://www.undo.is`, `https://status.undo.is`, and `http://localhost:5173`.
 - Changes to `workers/status.js` are only live after `terraform apply` (or `workflow_dispatch` with `apply=true`).

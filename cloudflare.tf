@@ -2,8 +2,6 @@ data "cloudflare_zone" "undois" {
   name = local.domain_name
 }
 
-
-
 resource "cloudflare_record" "www_cname" {
   zone_id = data.cloudflare_zone.undois.id
   name    = "www"
@@ -20,8 +18,60 @@ resource "cloudflare_zone_settings_override" "undois_settings" {
     always_use_https         = "on"
     automatic_https_rewrites = "on"
     brotli                   = "on"
+    email_obfuscation        = "off"
+    rocket_loader            = "off"
     security_level           = "medium"
     ssl                      = "full"
+  }
+}
+
+# Edge Security Headers for www.undo.is
+resource "cloudflare_ruleset" "security_headers" {
+  zone_id     = data.cloudflare_zone.undois.id
+  name        = "undo.is Security Headers"
+  description = "Add CSP, HSTS, and security response headers for www.undo.is"
+  kind        = "zone"
+  phase       = "http_response_headers_transform"
+
+  rules {
+    action      = "rewrite"
+    expression  = "(http.host eq \"www.${local.domain_name}\")"
+    description = "Set security headers on www.undo.is"
+    enabled     = true
+
+    action_parameters {
+      headers {
+        name = "Content-Security-Policy"
+        operation = "set"
+        # 'unsafe-inline' allows SvelteKit static adapter's inline hydration script and scoped styles
+        value = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data:; connect-src 'self' https://status.${local.domain_name}; frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
+      }
+      headers {
+        name      = "Permissions-Policy"
+        operation = "set"
+        value     = "camera=(), microphone=(), geolocation=()"
+      }
+      headers {
+        name      = "Referrer-Policy"
+        operation = "set"
+        value     = "strict-origin-when-cross-origin"
+      }
+      headers {
+        name      = "Strict-Transport-Security"
+        operation = "set"
+        value     = "max-age=31536000; includeSubDomains"
+      }
+      headers {
+        name      = "X-Content-Type-Options"
+        operation = "set"
+        value     = "nosniff"
+      }
+      headers {
+        name      = "X-Frame-Options"
+        operation = "set"
+        value     = "DENY"
+      }
+    }
   }
 }
 
