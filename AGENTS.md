@@ -31,6 +31,6 @@ This repository contains the Terraform configuration and Cloudflare Worker code 
 - **Host Mapping & Staleness**:
   - `EXPECTED_HOSTS` maps internal `hostId`s (`intelligence-1`, `glados-core-1`, `adventure-2`, `adventure-1`) to public IDs (`docker-host`, `vm-host`, `valheim`, `minecraft`).
   - `minecraft` is excluded from `allCoreOnline` (if only `minecraft` is offline, `overall` is `"degraded"`, not `"offline"`).
-  - `STALE_AFTER_MS` is `7 * 60 * 1000` (7 minutes).
+  - `STALE_AFTER_MS` is `11 * 60 * 1000` (11 minutes) to provide >2x buffer over the 5-minute `status-pusher` interval (`288` KV writes/day).
 - **CORS**: Allows `https://www.undo.is`, `https://status.undo.is`, and `http://localhost:5173`.
 - Changes to `workers/status.js` are only live after `terraform apply` (or `workflow_dispatch` with `apply=true`).
