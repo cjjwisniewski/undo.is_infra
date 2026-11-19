@@ -68,51 +68,59 @@ async function checkRateLimit(env, ip) {
   return { allowed: true };
 }
 
-async function sendViaCloudflareEmail(env, { to, fromEmail, fromName, replyToEmail, replyToName, subject, text, html }) {
-  // Prefer native Workers send_email binding when attached
-  if (env.EMAIL && typeof env.EMAIL.send === "function") {
-    const res = await env.EMAIL.send({
-      to,
-      from: { email: fromEmail, name: fromName },
-      replyTo: { email: replyToEmail, name: replyToName },
+async function sendViaResend(env, { to, from, replyTo, subject, text, html }) {
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from,
+      to: [to],
+      reply_to: replyTo,
       subject,
       text,
       html,
-    });
-    return { messageId: res?.messageId || null };
-  }
-
-  // Fallback to Cloudflare Email Sending REST API
-  if (!env.CF_EMAIL_API_TOKEN || !env.CF_ACCOUNT_ID) {
-    throw new Error("Email delivery is not configured yet.");
-  }
-
-  const response = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/email/sending/send`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.CF_EMAIL_API_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        to,
-        from: { address: fromEmail, name: fromName },
-        reply_to: { address: replyToEmail, name: replyToName },
-        subject,
-        text,
-        html,
-      }),
-    }
-  );
+    }),
+  });
 
   const result = await response.json().catch(() => ({}));
-  if (!response.ok || result.success === false) {
-    const errMsg = result?.errors?.[0]?.message || `Email API HTTP ${response.status}`;
-    throw new Error(errMsg);
+  if (!response.ok) {
+    throw new Error(result?.message || `Resend HTTP ${response.status}`);
   }
+  return result;
+}
 
-  return { messageId: result?.result?.message_id || null };
+async function sendViaDiscord(env, { name, email, domain, subject, message }) {
+  const fields = [
+    { name: "Name", value: name, inline: true },
+    { name: "Email", value: email, inline: true },
+    ...(domain ? [{ name: "Domain", value: domain, inline: true }] : []),
+    { name: "Subject", value: subject, inline: false },
+  ];
+
+  const embed = {
+    title: domain ? `Domain Inquiry: ${domain}` : "New Contact Form Message",
+    color: 0x38bdf8,
+    fields,
+    description: message.length > 3900 ? `${message.slice(0, 3900)}...` : message,
+    footer: { text: "www.undo.is" },
+    timestamp: new Date().toISOString(),
+  };
+
+  const response = await fetch(env.DISCORD_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username: "undo.is Contact",
+      embeds: [embed],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Discord webhook HTTP ${response.status}`);
+  }
 }
 
 export default {
@@ -132,7 +140,6 @@ export default {
       return jsonResponse({ error: "Method not allowed" }, 405, origin);
     }
 
-    // Enforce body size cap
     const contentLength = Number.parseInt(request.headers.get("Content-Length") || "0", 10);
     if (contentLength > MAX_BODY_BYTES) {
       return jsonResponse({ error: "Request too large" }, 413, origin);
@@ -150,7 +157,7 @@ export default {
       return jsonResponse({ error: "Invalid JSON payload" }, 400, origin);
     }
 
-    // Honeypot check: silently accept bot submissions without sending email
+    // Honeypot check: silently accept bot submissions without delivering
     if (typeof payload.website === "string" && payload.website.trim().length > 0) {
       return jsonResponse({ ok: true }, 200, origin);
     }
@@ -191,12 +198,24 @@ export default {
       );
     }
 
-    const subject = rawDomain ? `[undo.is] ${rawSubject}` : `[undo.is] ${rawSubject}`;
+    const hasResend = Boolean(env.RESEND_API_KEY);
+    const hasDiscord = Boolean(env.DISCORD_WEBHOOK_URL);
+
+    if (!hasResend && !hasDiscord) {
+      console.error("Neither RESEND_API_KEY nor DISCORD_WEBHOOK_URL is configured");
+      return jsonResponse(
+        { error: "Contact delivery is not configured yet. Please try again later." },
+        503,
+        origin
+      );
+    }
+
+    const subject = `[undo.is] ${rawSubject}`;
     const to = env.TO_EMAIL || "cameron@undo.is";
     const fromEmail = env.FROM_EMAIL || "contact@undo.is";
-    const fromName = "undo.is Contact Form";
+    const from = `undo.is Contact <${fromEmail}>`;
 
-    const textLines = [
+    const text = [
       `New message from www.undo.is`,
       ``,
       `Name: ${name}`,
@@ -206,8 +225,7 @@ export default {
       ``,
       `Message:`,
       message,
-    ];
-    const text = textLines.join("\n");
+    ].join("\n");
 
     const html = `
       <div style="font-family: system-ui, -apple-system, sans-serif; color: #0f172a; line-height: 1.6; max-width: 640px;">
@@ -221,26 +239,37 @@ export default {
       </div>
     `.trim();
 
-    try {
-      await sendViaCloudflareEmail(env, {
-        to,
-        fromEmail,
-        fromName,
-        replyToEmail: email,
-        replyToName: name,
-        subject,
-        text,
-        html,
-      });
+    const deliveries = [];
+    if (hasResend) {
+      deliveries.push(
+        sendViaResend(env, { to, from, replyTo: email, subject, text, html }).catch((err) => {
+          console.error("Resend delivery failed:", err?.message || err);
+          throw err;
+        })
+      );
+    }
+    if (hasDiscord) {
+      deliveries.push(
+        sendViaDiscord(env, { name, email, domain: rawDomain, subject: rawSubject, message }).catch(
+          (err) => {
+            console.error("Discord delivery failed:", err?.message || err);
+            throw err;
+          }
+        )
+      );
+    }
 
-      return jsonResponse({ ok: true }, 200, origin);
-    } catch (err) {
-      console.error("Contact email send failed:", err?.message || err);
+    const results = await Promise.allSettled(deliveries);
+    const anySucceeded = results.some((r) => r.status === "fulfilled");
+
+    if (!anySucceeded) {
       return jsonResponse(
         { error: "Unable to send your message right now. Please try again later." },
         502,
         origin
       );
     }
+
+    return jsonResponse({ ok: true }, 200, origin);
   },
 };

@@ -221,7 +221,7 @@ resource "cloudflare_workers_route" "status_subdomain" {
   script_name = cloudflare_workers_script.status_api.name
 }
 
-# --- Contact Form API (Cloudflare Worker + KV Rate Limit + Email Sending) ---
+# --- Contact Form API (Cloudflare Worker + KV Rate Limit + Resend + Discord) ---
 resource "cloudflare_workers_kv_namespace" "contact_ratelimit" {
   account_id = data.cloudflare_zone.undois.account_id
   title      = "undois_contact_ratelimit"
@@ -239,11 +239,6 @@ resource "cloudflare_workers_script" "contact_api" {
   }
 
   plain_text_binding {
-    name = "CF_ACCOUNT_ID"
-    text = data.cloudflare_zone.undois.account_id
-  }
-
-  plain_text_binding {
     name = "TO_EMAIL"
     text = "cameron@${local.domain_name}"
   }
@@ -254,8 +249,13 @@ resource "cloudflare_workers_script" "contact_api" {
   }
 
   secret_text_binding {
-    name = "CF_EMAIL_API_TOKEN"
-    text = var.cloudflare_email_api_token
+    name = "RESEND_API_KEY"
+    text = var.resend_api_key
+  }
+
+  secret_text_binding {
+    name = "DISCORD_WEBHOOK_URL"
+    text = var.discord_contact_webhook_url
   }
 }
 
