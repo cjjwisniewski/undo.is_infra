@@ -127,8 +127,7 @@ resource "cloudflare_ruleset" "cache_rules" {
       cache = true
 
       edge_ttl {
-        mode    = "respect_origin"
-        default = 300
+        mode = "respect_origin"
       }
 
       browser_ttl {
