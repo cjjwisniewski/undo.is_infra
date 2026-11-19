@@ -220,3 +220,47 @@ resource "cloudflare_workers_route" "status_subdomain" {
   pattern     = "status.${local.domain_name}/*"
   script_name = cloudflare_workers_script.status_api.name
 }
+
+# --- Contact Form API (Cloudflare Worker + KV Rate Limit + Email Sending) ---
+resource "cloudflare_workers_kv_namespace" "contact_ratelimit" {
+  account_id = data.cloudflare_zone.undois.account_id
+  title      = "undois_contact_ratelimit"
+}
+
+resource "cloudflare_workers_script" "contact_api" {
+  account_id = data.cloudflare_zone.undois.account_id
+  name       = "undois-contact-api"
+  content    = file("${path.module}/workers/contact.js")
+  module     = true
+
+  kv_namespace_binding {
+    name         = "RATE_LIMIT_KV"
+    namespace_id = cloudflare_workers_kv_namespace.contact_ratelimit.id
+  }
+
+  plain_text_binding {
+    name = "CF_ACCOUNT_ID"
+    text = data.cloudflare_zone.undois.account_id
+  }
+
+  plain_text_binding {
+    name = "TO_EMAIL"
+    text = "cameron@${local.domain_name}"
+  }
+
+  plain_text_binding {
+    name = "FROM_EMAIL"
+    text = "contact@${local.domain_name}"
+  }
+
+  secret_text_binding {
+    name = "CF_EMAIL_API_TOKEN"
+    text = var.cloudflare_email_api_token
+  }
+}
+
+resource "cloudflare_workers_route" "www_contact_api" {
+  zone_id     = data.cloudflare_zone.undois.id
+  pattern     = "www.${local.domain_name}/api/contact*"
+  script_name = cloudflare_workers_script.contact_api.name
+}
