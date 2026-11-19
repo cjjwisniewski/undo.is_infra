@@ -22,6 +22,13 @@ resource "cloudflare_zone_settings_override" "undois_settings" {
     rocket_loader            = "off"
     security_level           = "medium"
     ssl                      = "full"
+
+    security_header {
+      enabled            = true
+      max_age            = 31536000
+      include_subdomains = true
+      nosniff            = true
+    }
   }
 }
 
@@ -41,10 +48,10 @@ resource "cloudflare_ruleset" "security_headers" {
 
     action_parameters {
       headers {
-        name = "Content-Security-Policy"
+        name      = "Content-Security-Policy"
         operation = "set"
         # 'unsafe-inline' allows SvelteKit static adapter's inline hydration script and scoped styles
-        value = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data:; connect-src 'self' https://status.${local.domain_name}; frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
+        value = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self' https://status.${local.domain_name}; frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
       }
       headers {
         name      = "Permissions-Policy"
@@ -75,17 +82,86 @@ resource "cloudflare_ruleset" "security_headers" {
   }
 }
 
-# Redirect root domain to www
-resource "cloudflare_page_rule" "root_to_www" {
-  zone_id = data.cloudflare_zone.undois.id
-  target  = "${local.domain_name}/*"
-  status  = "active"
+# Redirect root domain to www (modern Redirect Ruleset replacing deprecated Page Rule)
+resource "cloudflare_ruleset" "root_to_www" {
+  zone_id     = data.cloudflare_zone.undois.id
+  name        = "undo.is Root to WWW Redirect"
+  description = "301 redirect apex undo.is to https://www.undo.is preserving path and query"
+  kind        = "zone"
+  phase       = "http_request_dynamic_redirect"
 
-  actions {
-    forwarding_url {
-      url         = "https://www.undo.is/$1"
-      status_code = 301
+  rules {
+    action      = "redirect"
+    expression  = "(http.host eq \"${local.domain_name}\")"
+    description = "Redirect apex to www"
+    enabled     = true
+
+    action_parameters {
+      from_value {
+        status_code           = 301
+        preserve_query_string = true
+
+        target_url {
+          expression = "concat(\"https://www.${local.domain_name}\", http.request.uri.path)"
+        }
+      }
     }
+  }
+}
+
+# Edge Cache Rules for static HTML & assets on www.undo.is
+resource "cloudflare_ruleset" "cache_rules" {
+  zone_id     = data.cloudflare_zone.undois.id
+  name        = "undo.is Static Site Cache Rules"
+  description = "Cache prerendered HTML at Cloudflare edge while bypassing API endpoints"
+  kind        = "zone"
+  phase       = "http_request_cache_settings"
+
+  rules {
+    action      = "set_cache_settings"
+    expression  = "(http.host eq \"www.${local.domain_name}\" and not starts_with(http.request.uri.path, \"/api/\"))"
+    description = "Cache static HTML and assets on www.undo.is respecting origin Cache-Control"
+    enabled     = true
+
+    action_parameters {
+      cache = true
+
+      edge_ttl {
+        mode    = "respect_origin"
+        default = 300
+      }
+
+      browser_ttl {
+        mode = "respect_origin"
+      }
+    }
+  }
+}
+
+# DNS CAA records restricting certificate issuance to Cloudflare Universal SSL CAs
+locals {
+  caa_records = {
+    letsencrypt_issue     = { tag = "issue", value = "letsencrypt.org" }
+    letsencrypt_issuewild = { tag = "issuewild", value = "letsencrypt.org" }
+    google_issue          = { tag = "issue", value = "pki.goog" }
+    google_issuewild      = { tag = "issuewild", value = "pki.goog" }
+    digicert_issue        = { tag = "issue", value = "digicert.com" }
+    digicert_issuewild    = { tag = "issuewild", value = "digicert.com" }
+    iodef                 = { tag = "iodef", value = "mailto:cameron@undo.is" }
+  }
+}
+
+resource "cloudflare_record" "caa" {
+  for_each = local.caa_records
+
+  zone_id = data.cloudflare_zone.undois.id
+  name    = "@"
+  type    = "CAA"
+
+  data {
+    flags = "0"
+    tag   = each.value.tag
+    value = each.value.value
   }
 }
 
