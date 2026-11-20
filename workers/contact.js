@@ -6,10 +6,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DOMAIN_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9-]{2,})+$/i;
 
 function corsHeaders(origin) {
-  const allowed =
-    origin === "https://www.undo.is" || origin === "http://localhost:5173"
-      ? origin
-      : "https://www.undo.is";
+  const allowed = origin === "https://www.undo.is" ? origin : "https://www.undo.is";
 
   return {
     "Access-Control-Allow-Origin": allowed,

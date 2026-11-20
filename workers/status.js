@@ -9,9 +9,7 @@ const EXPECTED_HOSTS = [
 
 function corsHeaders(origin) {
   const allowed =
-    origin === "https://www.undo.is" ||
-    origin === "https://status.undo.is" ||
-    origin === "http://localhost:5173"
+    origin === "https://www.undo.is" || origin === "https://status.undo.is"
       ? origin
       : "https://www.undo.is";
 
@@ -21,6 +19,24 @@ function corsHeaders(origin) {
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Cache-Control": "no-store",
   };
+}
+
+async function constantTimeEqual(a, b) {
+  const enc = new TextEncoder();
+  const [hashA, hashB] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(a)),
+    crypto.subtle.digest("SHA-256", enc.encode(b)),
+  ]);
+  const bytesA = new Uint8Array(hashA);
+  const bytesB = new Uint8Array(hashB);
+  if (typeof crypto.subtle.timingSafeEqual === "function") {
+    return crypto.subtle.timingSafeEqual(bytesA, bytesB);
+  }
+  let diff = 0;
+  for (let i = 0; i < bytesA.length; i++) {
+    diff |= bytesA[i] ^ bytesB[i];
+  }
+  return diff === 0;
 }
 
 function jsonResponse(data, status, origin) {
@@ -48,7 +64,7 @@ export default {
       }
 
       const auth = request.headers.get("Authorization") || "";
-      if (!env.HEARTBEAT_TOKEN || auth !== `Bearer ${env.HEARTBEAT_TOKEN}`) {
+      if (!env.HEARTBEAT_TOKEN || !(await constantTimeEqual(auth, `Bearer ${env.HEARTBEAT_TOKEN}`))) {
         return jsonResponse({ error: "Unauthorized" }, 401, origin);
       }
 
